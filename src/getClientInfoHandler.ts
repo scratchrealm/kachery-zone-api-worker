@@ -2,13 +2,14 @@ import { Client } from "./Client";
 import { GetClientInfoRequest, GetClientInfoResponse } from "./ApiRequest";
 import { NodeId } from "./keypair";
 import { getClient } from "./getDatabaseItems";
+import { Env } from ".";
 
-const getClientInfoHandler = async (request: GetClientInfoRequest, verifiedClientId: NodeId | undefined): Promise<GetClientInfoResponse> => {
+const getClientInfoHandler = async (request: GetClientInfoRequest, verifiedClientId: NodeId | undefined, env: Env): Promise<GetClientInfoResponse> => {
     const { clientId } = request.payload
 
     let client: Client
     try {
-        client = await getClient(clientId.toString())
+        client = await getClient(clientId.toString(), {includeSecrets: false}, env)
     }
     catch {
         return {

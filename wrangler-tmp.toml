@@ -1,0 +1,13 @@
+name = "default-zone-api-worker"
+main = "src/index.ts"
+compatibility_date = "2023-01-11"
+node_compat = true
+
+kv_namespaces = [
+  { binding = "FIND_FILE_CACHE", id = "64f5a354c0a24deb8add40a1cd2a1f9f" },
+  { binding = "LOG_ITEMS", id = "9bcccd8fc37d43f5ba3f3833d3459990" }
+]
+
+r2_buckets = [
+  { binding = "BUCKET", bucket_name = "kachery-default", preview_bucket_name = "" }
+]

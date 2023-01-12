@@ -1,7 +1,7 @@
-import crypto from 'crypto'
+// import { Buffer } from 'buffer'
 import nacl from 'tweetnacl'
-import { isPrivateKeyHex, isPublicKeyHex, isSignature, KeyPair, NodeId, PrivateKey, PrivateKeyHex, PublicKey, PublicKeyHex, Sha1Hash, Signature } from '../types/keypair'
-import { Buffer } from 'buffer'
+import { isPrivateKeyHex, isPublicKeyHex, isSignature, KeyPair, NodeId, PrivateKey, PrivateKeyHex, PublicKey, PublicKeyHex, Sha1Hash, Signature } from '../keypair'
+import sha1 from 'js-sha1'
 
 const ed25519PubKeyPrefix = "302a300506032b6570032100"
 const ed25519PrivateKeyPrefix = "302e020100300506032b657004220420"
@@ -43,29 +43,30 @@ export const verifySignature = async (msg: any, publicKey: PublicKey, signature:
     const publicKeyBuffer = Buffer.from(publicKeyHex.toString(), 'hex')
     const signatureBuffer = Buffer.from(signature.toString(), 'hex')
     const okay = nacl.sign.detached.verify(messageHashBuffer, signatureBuffer, publicKeyBuffer)
-    if (!okay) {
-        // if not verified we try the method we used to use for signing (in the future we'll want to migrate away from this - resigning old feed messages)
-        // the old method requires a crypto function that is difficult to get to work in the browser
-        return legacyVerifyMessage(msg, publicKey, signature)
-    }
+    // if (!okay) {
+    //     // if not verified we try the method we used to use for signing (in the future we'll want to migrate away from this - resigning old feed messages)
+    //     // the old method requires a crypto function that is difficult to get to work in the browser
+    //     return legacyVerifyMessage(msg, publicKey, signature)
+    // }
     return okay
 }
 
-const legacyVerifyMessage = async (msg: any, publicKey: PublicKey, signature: Signature): Promise<boolean> => {
-    // crypto.verify is not available in the browser, and I can't get the other crypto functions to work properly
-    if (!crypto.verify) {
-        console.warn('Problem verifying signature, and unable to use crypto.verify (in verifySignature)')
-        return false
-    }
-    const verified = crypto.verify(null, Buffer.from(stringifyDeterministicWithSortedKeys(msg)), publicKey.toString(), Buffer.from(signature.toString(), 'hex'))
-    // why does typescript think that verified is a buffer? it should be boolean!
-    return verified as any as boolean
-}
+// const legacyVerifyMessage = async (msg: any, publicKey: PublicKey, signature: Signature): Promise<boolean> => {
+//     // crypto.verify is not available in the browser, and I can't get the other crypto functions to work properly
+//     if (!crypto.verify) {
+//         console.warn('Problem verifying signature, and unable to use crypto.verify (in verifySignature)')
+//         return false
+//     }
+//     const verified = crypto.verify(null, Buffer.from(stringifyDeterministicWithSortedKeys(msg)), publicKey.toString(), Buffer.from(signature.toString(), 'hex'))
+//     // why does typescript think that verified is a buffer? it should be boolean!
+//     return verified as any as boolean
+// }
 
 export const stringSha1 = (x: string): Sha1Hash => {
-    const sha1sum = crypto.createHash('sha1')
-    sha1sum.update(x)
-    return sha1sum.digest('hex') as any as Sha1Hash
+    return sha1(x)
+    // const sha1sum = crypto.createHash('sha1')
+    // sha1sum.update(x)
+    // return sha1sum.digest('hex') as any as Sha1Hash
 }
 
 // Thanks: https://stackoverflow.com/questions/16167581/sort-object-properties-and-json-stringify

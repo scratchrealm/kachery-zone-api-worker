@@ -1,16 +1,17 @@
 import YAML from 'yaml'
+import { Env } from '.'
 import { AuthorizationSettings, isAuthorizationSettings } from './AuthorizationSettings'
-import { getBucket } from "./initiateFileUploadHandler"
 import ObjectCache from "./ObjectCache"
-import { getObjectContent } from "./s3Helpers"
 
 const authorizationSettingsCache = new ObjectCache<AuthorizationSettings>(1000 * 60 * 5)
 
-const getAuthorizationSettings = async () => {
+const getAuthorizationSettings = async (env: Env) => {
     const a = authorizationSettingsCache.get('main')
     if (a) return a
-    const bucket = getBucket()
-    let x = (await getObjectContent(bucket, 'settings/authorizationSettings.yaml')).toString()
+    const k = 'settings/authorizationSettings.yaml'
+    const obj = await env.BUCKET.get(k, {})
+    if (!obj) throw Error('Authorization settings not found')
+    const x = await obj.text()
     const authorizationSettings = YAML.parse(x)
     if (!isAuthorizationSettings(authorizationSettings)) {
         throw Error('Invalid authorization settings')

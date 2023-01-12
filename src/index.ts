@@ -20,6 +20,11 @@ import { LogItem } from "./LogItem";
 import randomAlphaString from "./randomAlphaString";
 
 export interface Env {
+	BUCKET_ACCESS_KEY_ID: string;
+    BUCKET_SECRET_ACCESS_KEY_ID: string;
+    BUCKET_REGION: string;
+    BUCKET_NAME: string;
+
 	// Example binding to KV. Learn more at https://developers.cloudflare.com/workers/runtime-apis/kv/
 	FIND_FILE_CACHE: KVNamespace;
 	LOG_ITEMS: KVNamespace;
@@ -28,7 +33,7 @@ export interface Env {
 	// MY_DURABLE_OBJECT: DurableObjectNamespace;
 	//
 	// Example binding to R2. Learn more at https://developers.cloudflare.com/workers/runtime-apis/r2/
-	// MY_BUCKET: R2Bucket;
+	BUCKET: R2Bucket;
 }
 
 export default {
@@ -59,15 +64,15 @@ export default {
 			}
 
 			if (method === 'POST') {
-				const req = await(readRequestJson(request))
+				const req = await readRequestJson(request)
 				if (urlPath === '/api') {
 					if (!isApiRequest(req)) {
-						throw Error('Invalid POST request')
+						throw Error(`Invalid POST request: ${JSON.stringify(req)}`)
 					}
 					const verifiedClientId = await verifyClientId(req.fromClientId, req.payload, req.signature)
 					const verifiedUserId = await verifyGithubUserId(req.githubUserId, req.githubAccessToken)
 					if (isFindFileRequest(req)) {
-						const resp = await findFileHandler(req, verifiedClientId, verifiedUserId, env.FIND_FILE_CACHE)
+						const resp = await findFileHandler(req, verifiedClientId, verifiedUserId, env)
 						if (!resp.cacheHit) {
 							const elapsed = Date.now() - timer
 							await writeLogItem({request: req, response: resp, requestTimestamp: req.payload.timestamp, elapsed, requestHeaders})
@@ -75,7 +80,7 @@ export default {
 						return jsonResponse(resp, {origin})
 					}
 					else if (isInitiateFileUploadRequest(req)) {
-						const resp = await initiateFileUploadHandler(req, verifiedClientId, verifiedUserId, env.FIND_FILE_CACHE)
+						const resp = await initiateFileUploadHandler(req, verifiedClientId, verifiedUserId, env)
 						if (!resp.alreadyExists) {
 							const elapsed = Date.now() - timer
 							await writeLogItem({request: req, response: resp, requestTimestamp: req.payload.timestamp, elapsed, requestHeaders})
@@ -83,17 +88,17 @@ export default {
 						return jsonResponse(resp, {origin})
 					}
 					else if (isFinalizeFileUploadRequest(req)) {
-						const resp = await finalizeFileUploadHandler(req, verifiedClientId, verifiedUserId)
+						const resp = await finalizeFileUploadHandler(req, verifiedClientId, verifiedUserId, env)
 						const elapsed = Date.now() - timer
 						await writeLogItem({request: req, response: resp, requestTimestamp: req.payload.timestamp, elapsed, requestHeaders})
 						return jsonResponse(resp, {origin})
 					}
 					else if (isGetClientInfoRequest(req)) {
-						const resp = await getClientInfoHandler(req, verifiedClientId)
+						const resp = await getClientInfoHandler(req, verifiedClientId, env)
 						return jsonResponse(resp, {origin})
 					}
 					else if (isGetResourceInfoRequest(req)) {
-						const resp = await getResourceInfoHandler(req, verifiedClientId)
+						const resp = await getResourceInfoHandler(req, verifiedClientId, env)
 						return jsonResponse(resp, {origin})
 					}
 					else {
@@ -104,11 +109,50 @@ export default {
 					throw Error(`Unexpected URL path: ${urlPath}`)
 				}
 			}
+			else if (method === 'GET') {
+				if (urlPath.startsWith('/api/download')) {
+					const objectKey = urlPath.split('/').slice(3).join('/')
+					if (!objectKey.startsWith('sha1/')) {
+						throw Error(`Invalid object key: ${objectKey}`)
+					}
+					const obj = await env.BUCKET.get(objectKey)
+					if (!obj) {
+						return new Response('Not found', {status: 404})
+					}
+					const headers = new Headers()
+					if (['https://figurl.org', 'http://localhost:3000'].includes(origin)) {
+						headers.set('ALLOW-ORIGIN', origin)
+					}
+					return new Response(obj.body, {status: 200, headers})
+				}
+				else {
+					throw Error('Invalid path')
+				}
+			}
+			else if (method === 'PUT') {
+				if (urlPath.startsWith('/api/upload')) {
+					const objectKey = urlPath.split('/').slice(3).join('/')
+					if (!objectKey.startsWith('sha1/')) {
+						throw Error(`Invalid object key: ${objectKey}`)
+					}
+					const obj = await env.BUCKET.head(objectKey)
+					if (obj) {
+						console.warn('Object already exists.')
+						// in this case we don't want to overwrite, because it would open us up to an attack of replacing content with corrupt data
+						return new Response('Already exists.', {status: 200})
+					}
+					await env.BUCKET.put(objectKey, request.body)
+					return new Response('', {status: 200})
+				}
+				else {
+					throw Error('Invalid path')
+				}
+			}
 			else {
 				return new Response('Method Not Allowed', {
 					status: 405,
 					headers: {
-						Allow: 'POST'
+						Allow: 'POST, GET, PUT'
 					}
 				})
 			}
@@ -125,7 +169,7 @@ function jsonResponse(resp: any, o: {origin: string}) {
 	const headers = new Headers()
 	headers.set('content-type', 'application/json')
 	headers.set('allow-origin', o.origin)
-	return new Response(resp, {
+	return new Response(JSON.stringify(resp), {
 		status: 200,
 		headers
 	})
@@ -141,7 +185,7 @@ async function readRequestJson(request: Request) {
 	const contentType = headers.get('content-type') || '';
   
 	if (contentType.includes('application/json')) {
-		return JSON.stringify(await request.json());
+		return await request.json();
 	} else {
 		throw Error(`Invalid content type for request: ${contentType}`)
 	}

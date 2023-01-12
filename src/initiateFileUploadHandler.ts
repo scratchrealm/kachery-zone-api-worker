@@ -1,10 +1,11 @@
+import { Env } from ".";
 import { InitiateFileUploadRequest, InitiateFileUploadResponse } from "./ApiRequest";
-import { NodeId } from "./keypair";
 import { findFile } from "./findFileHandler";
-import ObjectCache from "./ObjectCache";
-import { Bucket, getSignedUploadUrl } from "./s3Helpers";
 import getAuthorizationSettings from "./getAuthorizationSettings";
 import { getClient } from "./getDatabaseItems";
+import { getSignedUrl } from "./getSignedUrl";
+import { NodeId } from "./keypair";
+import ObjectCache from "./ObjectCache";
 
 export const MAX_UPLOAD_SIZE = 5 * 1000 * 1000 * 1000
 
@@ -19,39 +20,7 @@ export const getPendingUploadKey = ({hash, hashAlg, projectId}: {hash: string, h
 }
 export const pendingUploads = new ObjectCache<PendingUpload>(1000 * 60 * 5)
 
-export const getBucket = () => {
-    const bucket: Bucket = {
-        uri: process.env['BUCKET_URI'] || '',
-        credentials: process.env['BUCKET_CREDENTIALS'] || ''
-    }
-    if (!bucket.uri) {
-        throw Error(`Environment variable not set: BUCKET_URI`)
-    }
-    if (!bucket.credentials) {
-        throw Error(`Environment variable not set: BUCKET_CREDENTIALS`)
-    }
-    return bucket
-}
-const bucket = getBucket()
-
-export const getFallbackBucket = () => {
-    if (!process.env['FALLBACK_BUCKET_URI']) {
-        return undefined
-    }
-    const bucket: Bucket = {
-        uri: process.env['FALLBACK_BUCKET_URI'] || '',
-        credentials: process.env['FALLBACK_BUCKET_CREDENTIALS'] || ''
-    }
-    if (!bucket.uri) {
-        throw Error(`Environment variable not set: FALLBACK_BUCKET_URI`)
-    }
-    if (!bucket.credentials) {
-        throw Error(`Environment variable not set: FALLBACK_BUCKET_CREDENTIALS`)
-    }
-    return bucket
-}
-
-const initiateFileUploadHandler = async (request: InitiateFileUploadRequest, verifiedClientId: NodeId | undefined, verifiedUserId: string | undefined, findFileCache: KVNamespace): Promise<InitiateFileUploadResponse> => {
+const initiateFileUploadHandler = async (request: InitiateFileUploadRequest, verifiedClientId: NodeId | undefined, verifiedUserId: string | undefined, env: Env): Promise<InitiateFileUploadResponse> => {
     const { size, hashAlg, hash } = request.payload
 
     const clientId = verifiedClientId
@@ -70,19 +39,19 @@ const initiateFileUploadHandler = async (request: InitiateFileUploadRequest, ver
         }
         // make sure the client is registered
         // in the future we will check the owner for authorization
-        const client = await getClient(clientId.toString())
+        const client = await getClient(clientId.toString(), {includeSecrets: false}, env)
         userId = client.ownerId
     }
     
     // check the user ID for authorization
-    const authorizationSettings = await getAuthorizationSettings()
+    const authorizationSettings = await getAuthorizationSettings(env)
     if (!authorizationSettings.allowPublicUpload) {
         const u = authorizationSettings.authorizedUsers.find(a => (a.userId === userId))
         if (!u) throw Error(`User ${userId} is not authorized.`)
         if (!u.upload) throw Error(`User ${userId} not authorized to upload files.`)
     }
 
-    const findFileResponse = await findFile({hash, hashAlg, noFallback: true}, findFileCache)
+    const findFileResponse = await findFile({hash, hashAlg, noFallback: true}, env)
     if (findFileResponse.found) {
         return {
             type: 'initiateFileUpload',
@@ -96,7 +65,7 @@ const initiateFileUploadHandler = async (request: InitiateFileUploadRequest, ver
     // const objectKey = `uploads/${hashAlg}/${h[0]}${h[1]}/${h[2]}${h[3]}/${h[4]}${h[5]}/${hash}`
     const objectKey = `${hashAlg}/${h[0]}${h[1]}/${h[2]}${h[3]}/${h[4]}${h[5]}/${hash}`
 
-    const signedUploadUrl = await getSignedUploadUrl(bucket, objectKey)
+    const signedUploadUrl = await getSignedUrl('putObject', objectKey, 60 * 60, env)
 
     /////////////////////////////////////////////////////////////////////
     // not working as hoped - maybe because we get a different instance between initiate and finalize

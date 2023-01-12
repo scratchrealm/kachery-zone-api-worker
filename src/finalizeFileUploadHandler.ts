@@ -1,13 +1,10 @@
+import { Env } from ".";
 import { FinalizeFileUploadRequest, FinalizeFileUploadResponse } from "./ApiRequest";
-import { NodeId } from './keypair';
-import { getClient } from "./getDatabaseItems";
 import getAuthorizationSettings from "./getAuthorizationSettings";
-import { getBucket, MAX_UPLOAD_SIZE } from "./initiateFileUploadHandler";
-import { deleteObject, headObject } from "./s3Helpers";
+import { getClient } from "./getDatabaseItems";
+import { NodeId } from './keypair';
 
-const bucket = getBucket()
-
-const finalizeFileUploadHandler = async (request: FinalizeFileUploadRequest, verifiedClientId?: NodeId, verifiedUserId?: string): Promise<FinalizeFileUploadResponse> => {
+const finalizeFileUploadHandler = async (request: FinalizeFileUploadRequest, verifiedClientId: NodeId | undefined, verifiedUserId: string | undefined, env: Env): Promise<FinalizeFileUploadResponse> => {
     const { objectKey, size } = request.payload
 
     const clientId = verifiedClientId
@@ -22,37 +19,27 @@ const finalizeFileUploadHandler = async (request: FinalizeFileUploadRequest, ver
         }
         // make sure the client is registered
         // in the future we will check the owner for authorization
-        const client = await getClient(clientId.toString())
+        const client = await getClient(clientId.toString(), {includeSecrets: false}, env)
         userId = client.ownerId
     }
 
     // check the user ID for authorization
-    const authorizationSettings = await getAuthorizationSettings()
+    const authorizationSettings = await getAuthorizationSettings(env)
     if (!authorizationSettings.allowPublicUpload) {
         const u = authorizationSettings.authorizedUsers.find(a => (a.userId === userId))
         if (!u) throw Error(`User ${userId} is not authorized.`)
         if (!u.upload) throw Error(`User ${userId} not authorized to upload files.`)
     }
 
-    const x = await headObject(bucket, objectKey)
-    const size0 = x.ContentLength
-    if (size0 === undefined) {
-        throw Error('No ContentLength in object')
+    const obj = await env.BUCKET.head(objectKey)
+    if (!obj) {
+        throw Error('Unable to find object in bucket')
     }
-    if (size0 > MAX_UPLOAD_SIZE) {
-        await deleteObject(bucket, objectKey)
-        throw Error(`File too large *: ${size0} > ${MAX_UPLOAD_SIZE}`)
-    }
+    const size0 = obj.size
     if (size0 !== size) {
-        await deleteObject(bucket, objectKey)
+        await env.BUCKET.delete(objectKey)
         throw Error(`Unexpected object size: ${size0} <> ${size}`)
     }
-
-    // in case we want to copy it on finalize
-    // const h = hash
-    // const newObjectKey = `uploads/${hashAlg}/${h[0]}${h[1]}/${h[2]}${h[3]}/${h[4]}${h[5]}/${hash}`
-    // await copyObject(bucket, objectKey, newObjectKey)
-    // await deleteObject(bucket, objectKey)
 
     /////////////////////////////////////////////////////////////////////
     // not working as hoped - probably because we get a different instance between initiate and finalize

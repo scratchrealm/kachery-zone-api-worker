@@ -1,5 +1,6 @@
 import validateObject, { isString } from "./validateObject";
-import * as crypto from 'crypto'
+// import * as crypto from 'crypto'
+import sha1 from 'js-sha1'
 
 // PublicKey
 export interface PublicKey extends String {
@@ -101,9 +102,10 @@ export const sha1OfObject = (x: any): Sha1Hash => {
     return sha1OfString(JSONStringifyDeterministic(x))
 }
 export const sha1OfString = (x: string): Sha1Hash => {
-    const sha1sum = crypto.createHash('sha1')
-    sha1sum.update(x)
-    return sha1sum.digest('hex') as any as Sha1Hash
+    return sha1(x)
+    // const sha1sum = crypto.createHash('sha1')
+    // sha1sum.update(x)
+    // return sha1sum.digest('hex') as any as Sha1Hash
 }
 // Thanks: https://stackoverflow.com/questions/16167581/sort-object-properties-and-json-stringify
 export const JSONStringifyDeterministic = ( obj: any, space: string | number | undefined =undefined ) => {
